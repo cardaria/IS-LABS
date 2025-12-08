@@ -131,7 +131,7 @@ void handle_interrupt(unsigned cause) {
   // This handles the switch toggling to jump time forward
   if (cause == 17) {
     int current_switch_state = get_sw();
-    int switch_changed = current_switch_state ^ previous_switch_state;
+    int switch_changed = current_switch_state ^ previous_switch_state; // XOR to find changed bits
 
     // Check if OUR specific switch changed (bit position)
     if (switch_changed & (1 << SWITCH_BIT_POSITION)) {
