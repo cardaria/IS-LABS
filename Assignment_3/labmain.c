@@ -2,9 +2,10 @@
 
    This file written 2024 by Artur Podobas and Pedro Antunes
 
-   For copyright and licensing, see file COPYING */
+   For copyright and licensing, see file COPYING 
 
-/* 
+*/
+
 
 // *** SWITCH CONFIGURATION ***
 #define SWITCH_NUMBER 2           // CHANGE THIS: 2 for Switch #2, 3 for Switch #3
