@@ -34,8 +34,12 @@ char textstring[] = "text, more text, and even more text!";
 /* Hardware I/O register pointers */
 volatile int *LED_PTR       = (volatile int *) 0x04000000; // LEDs
 volatile int *DISPLAYS_PTR  = (volatile int *) 0x04000050; // 7-segment displays
-volatile int *SWITCH_PTR    = (volatile int *) 0x04000010; // Switches
+volatile int *SWITCH_PTR    = (volatile int *) 0x04000010; // Switches (data register, offset 0)
 volatile int *BUTTON_PTR    = (volatile int *) 0x040000d0; // Buttons
+
+/* Switch PIO registers (according to PIO documentation) */
+volatile int *switch_interruptmask = (volatile int *) 0x04000018; // Offset 2 from switch base
+volatile int *switch_edgecapture   = (volatile int *) 0x0400001C; // Offset 3 from switch base
 
 /* Timer registers */
 volatile int *timer_status  = (volatile int *) 0x04000020; // Offset 0
@@ -86,6 +90,12 @@ void labinit(void) {
   *timer_periodl = period & 0xFFFF;         // Set the lower 16 bits of the period
   *timer_periodh = (period >> 16) & 0xFFFF; // Set the upper 16 bits of the period
   *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
+
+  // CRITICAL: Configure switch hardware to generate interrupts!
+  // According to PIO documentation, we must set interruptmask register
+  // Setting a bit to 1 enables interrupts for that switch
+  *switch_interruptmask = 0x3FF;  // Enable interrupts for all 10 switches (bits 0-9)
+  *switch_edgecapture = 0x3FF;    // Clear any pending edge captures
 
   // Initialize displays to show the starting time immediately
   int sec_ones = (mytime >> 0) & 0xF;
@@ -154,6 +164,11 @@ void handle_interrupt(unsigned cause) {
   // ====== SWITCH INTERRUPT (cause == 17) ======
   // This handles the switch toggling to jump time forward
   if (cause == 17) {
+    // CRITICAL: Clear edge capture register to acknowledge interrupt
+    // According to PIO doc: write any value to clear all bits (if bit-clearing disabled)
+    // or write 1s to bits you want to clear
+    *switch_edgecapture = 0x3FF;  // Clear all edge captures
+
     int current_switch_state = get_sw();
     int switch_changed = current_switch_state ^ previous_switch_state; // XOR to find changed bits
 
