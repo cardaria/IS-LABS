@@ -34,7 +34,7 @@ char textstring[] = "text, more text, and even more text!";
 /* Hardware I/O register pointers */
 volatile int *LED_PTR       = (volatile int *) 0x04000000; // LEDs
 volatile int *DISPLAYS_PTR  = (volatile int *) 0x04000050; // 7-segment displays
-volatile int *SWITCH_PTR    = (volatile int *) 0x04000010; // Switches
+volatile int *SWITCH_PTR    = (volatile int *) 0x04000010; // Switches (data register, offset 0)
 volatile int *BUTTON_PTR    = (volatile int *) 0x040000d0; // Buttons
 
 /* Timer registers */
@@ -43,12 +43,9 @@ volatile int *timer_control = (volatile int *) 0x04000024; // Offset 1
 volatile int *timer_periodl = (volatile int *) 0x04000028; // Offset 2
 volatile int *timer_periodh = (volatile int *) 0x0400002C; // Offset 3
 
-/* Track previous switch state to detect changes */
-int previous_switch_state = 0;
-
 /* Helper function: Display a single digit (0-9) on a 7-segment display */
 void set_displays(int display_number, int value) {
-  // Create a pointer to the specific display (each display is 4 bytes apart)
+  // Each display is 16 bytes apart in memory (4 int-sized steps = 16 bytes)
   volatile int *DISPLAY_PTR = DISPLAYS_PTR + 4 * display_number;
   char pattern;
 
@@ -87,21 +84,40 @@ void labinit(void) {
   *timer_periodh = (period >> 16) & 0xFFFF; // Set the upper 16 bits of the period
   *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
 
-  // Enable global interrupts (this enables both timer and switch interrupts)
+  // Initialize displays to show the starting time immediately
+  int sec_ones = (mytime >> 0) & 0xF;
+  int sec_tens = (mytime >> 4) & 0xF;
+  int min_ones = (mytime >> 8) & 0xF;
+  int min_tens = (mytime >> 12) & 0xF;
+  int hou_ones = hours % 10;
+  int hou_tens = hours / 10;
+
+  set_displays(0, sec_ones);
+  set_displays(1, sec_tens);
+  set_displays(2, min_ones);
+  set_displays(3, min_tens);
+  set_displays(4, hou_ones);
+  set_displays(5, hou_tens);
+
+  // Enable global interrupts (timer only)
   enable_interrupt();
 }
 
-/* Handle interrupts from BOTH timer (normal ticking) and switches (time jumps) */
+/* Handle timer interrupts */
 void handle_interrupt(unsigned cause) {
 
-  // ====== TIMER INTERRUPT (cause is timer) ======
-  // This handles the normal 1-second clock ticking
-  timeout_counter++; // Increment the timeout counter
+  // ====== TIMER INTERRUPT ======
+  // Check if timer status register indicates a timer interrupt
+  if (*timer_status & 1) {
+    // CRITICAL: Acknowledge timer interrupt by clearing the status bit
+    *timer_status = 0;
 
-  if (timeout_counter == 10) { // Every 1 second (10 × 0.1s)
-    timeout_counter = 0; // Reset the timeout counter
+    timeout_counter++; // Increment the timeout counter (0-9 for deciseconds)
 
-    // Extract the digits from mytime and hours (BCD format)
+    if (timeout_counter == 10) { // Every 1 second (10 × 0.1s)
+      timeout_counter = 0; // Reset the timeout counter
+
+      // Extract the digits from mytime and hours (BCD format) - BEFORE ticking
       int sec_ones = (mytime >> 0) & 0xF;
       int sec_tens = (mytime >> 4) & 0xF;
       int min_ones = (mytime >> 8) & 0xF;
@@ -109,7 +125,7 @@ void handle_interrupt(unsigned cause) {
       int hou_ones = hours % 10;
       int hou_tens = hours / 10;
 
-    // Update the 7-segment displays
+      // Update the 7-segment displays (same order as Assignment 2)
       set_displays(0, sec_ones);
       set_displays(1, sec_tens);
       set_displays(2, min_ones);
@@ -118,57 +134,17 @@ void handle_interrupt(unsigned cause) {
       set_displays(5, hou_tens);
 
       // Tick the clock forward by 1 second
-    tick(&mytime); // Ticks the clock once
+      tick(&mytime);
 
       // Handle hour rollover
-    if (mytime == 0x10000) { // After 0x5959 it goes to 0x10000, then reset mytime and increment hours
+      if (mytime == 0x10000) { // After 0x5959 it goes to 0x10000, then reset mytime and increment hours
         mytime = 0;
         hours++;
         if (hours == 24) hours = 0;
       }
     }
-
-  // ====== SWITCH INTERRUPT (cause == 17) ======
-  // This handles the switch toggling to jump time forward
-  if (cause == 17) {
-    int current_switch_state = get_sw();
-    int switch_changed = current_switch_state ^ previous_switch_state; // XOR to find changed bits
-
-    // Check if OUR specific switch changed (bit position)
-    if (switch_changed & (1 << SWITCH_BIT_POSITION)) {
-      // Increment mytime by the configured amount
-      // TIME_INCREMENT is in seconds, add directly in BCD
-      for (int i = 0; i < TIME_INCREMENT; i++) {
-        tick(&mytime);
-        if (mytime == 0x10000) {
-          mytime = 0;
-          hours++;
-          if (hours == 24) hours = 0;
-        }
-      }
-
-      // Update displays immediately
-      int sec_ones = (mytime >> 0) & 0xF;
-      int sec_tens = (mytime >> 4) & 0xF;
-      int min_ones = (mytime >> 8) & 0xF;
-      int min_tens = (mytime >> 12) & 0xF;
-      int hou_ones = hours % 10;
-      int hou_tens = hours / 10;
-
-      set_displays(0, sec_ones);
-      set_displays(1, sec_tens);
-      set_displays(2, min_ones);
-      set_displays(3, min_tens);
-      set_displays(4, hou_ones);
-      set_displays(5, hou_tens);
-    }
-
-    // Update switch state
-    previous_switch_state = current_switch_state;
-
-    // Debounce delay to prevent multiple triggers
-    for (volatile int i = 0; i < 100000; i++);
   }
+
 }
 
 /* Main program */
