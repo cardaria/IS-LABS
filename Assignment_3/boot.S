@@ -135,13 +135,13 @@ enable_interrupt:
     # startadressen för all trap/interrupt-hantering.
     csrw mtvec, t0
 
-    # Tillåt externa interrupts från den specifika klockan (bit 4 = 16)
-    csrsi mie, 16 // Bit 4 i mie / mask 10000 = 16 : kopplad till Avalon-timer (IRQ-källa)
-
-    # Tillåt externa interrupts från switches (bit 5 = 32)
-    # OBS: csrsi kan bara ta 5-bit immediate (0-31), så vi använder register
-    li   t1, 32        # Ladda 32 (bit 5 för switch interrupt 17)
-    csrs mie, t1       # Sätt bit 5 i mie-registret
+    # Tillåt externa interrupts från både timer (bit 4) och switches (bit 5)
+    # Bit 4 = timer interrupt 16 (värde 16 = 0b010000)
+    # Bit 5 = switch interrupt 17 (värde 32 = 0b100000)
+    # Båda samtidigt: 48 = 16 + 32 = 0b110000
+    # OBS: csrsi kan bara ta 5-bit immediate (0-31), så vi måste använda register
+    li   t1, 48        # Ladda 48 (både bit 4 och 5)
+    csrs mie, t1       # Sätt båda bitarna i mie-registret SAMTIDIGT
 
     # Slå på global machine-interrupt (MIE-flaggan i mstatus)
     csrsi mstatus, 3

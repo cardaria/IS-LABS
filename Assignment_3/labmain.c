@@ -38,6 +38,7 @@ volatile int *SWITCH_PTR    = (volatile int *) 0x04000010; // Switches (data reg
 volatile int *BUTTON_PTR    = (volatile int *) 0x040000d0; // Buttons
 
 /* Switch PIO registers (according to PIO documentation) */
+volatile int *switch_direction     = (volatile int *) 0x04000014; // Offset 1 from switch base
 volatile int *switch_interruptmask = (volatile int *) 0x04000018; // Offset 2 from switch base
 volatile int *switch_edgecapture   = (volatile int *) 0x0400001C; // Offset 3 from switch base
 
@@ -92,8 +93,11 @@ void labinit(void) {
   *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
 
   // CRITICAL: Configure switch hardware to generate interrupts!
-  // According to PIO documentation, we must set interruptmask register
-  // Setting a bit to 1 enables interrupts for that switch
+  // According to PIO documentation:
+  // 1. Set direction = 0 for INPUT (required for switches)
+  // 2. Set interruptmask bits to enable interrupts
+  // 3. Clear edgecapture to acknowledge any pending edges
+  *switch_direction = 0x000;      // Set all switches as INPUT (0 = input, 1 = output)
   *switch_interruptmask = 0x3FF;  // Enable interrupts for all 10 switches (bits 0-9)
   *switch_edgecapture = 0x3FF;    // Clear any pending edge captures
 
