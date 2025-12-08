@@ -10,6 +10,7 @@
 // Set these values to match the desired surprise assignment.
 #define SWITCH_NUMBER 2           // 2 for Switch #2, 3 for Switch #3
 #define TIME_INCREMENT 3          // Seconds to add per switch interrupt (2 or 3)
+#define SWITCH_DEBOUNCE_MS 10     // Small delay to filter bounce without stalling timer
 
 // Calculate bit position: Switch #1 -> bit 0, Switch #2 -> bit 1, etc.
 #define SWITCH_BIT_POSITION (SWITCH_NUMBER - 1)
@@ -54,6 +55,28 @@ volatile int *button_direction     = (volatile int *) (0x040000d0 + 0x04);
 volatile int *button_irq_mask      = (volatile int *) (0x040000d0 + 0x08);
 volatile int *button_edge_capture  = (volatile int *) (0x040000d0 + 0x0C);
 
+/* Helper: drive a single 7-seg display */
+static void set_displays(int display_number, int value) {
+  volatile int *DISPLAY_PTR = DISPLAYS_PTR + 4 * display_number;
+  char pattern;
+
+  switch (value) {
+    case 0: pattern = 0b11000000; break;
+    case 1: pattern = 0b11111001; break;
+    case 2: pattern = 0b10100100; break;
+    case 3: pattern = 0b10110000; break;
+    case 4: pattern = 0b10011001; break;
+    case 5: pattern = 0b10010010; break;
+    case 6: pattern = 0b10000010; break;
+    case 7: pattern = 0b11111000; break;
+    case 8: pattern = 0b10000000; break;
+    case 9: pattern = 0b10010000; break;
+    default: pattern = 0xFF; break; // Off for invalid input
+  }
+
+  *DISPLAY_PTR = pattern;
+}
+
 /* Helper: Update all 7-segment displays to reflect current time */
 static void update_displays(void) {
   int sec_ones = (mytime >> 0) & 0xF;
@@ -63,66 +86,12 @@ static void update_displays(void) {
   int hou_ones = hours % 10;
   int hou_tens = hours / 10;
 
-  volatile int *DISPLAY_PTR = DISPLAYS_PTR;
-  DISPLAY_PTR[0] = (sec_ones == 0) ? 0b11000000 :
-                   (sec_ones == 1) ? 0b11111001 :
-                   (sec_ones == 2) ? 0b10100100 :
-                   (sec_ones == 3) ? 0b10110000 :
-                   (sec_ones == 4) ? 0b10011001 :
-                   (sec_ones == 5) ? 0b10010010 :
-                   (sec_ones == 6) ? 0b10000010 :
-                   (sec_ones == 7) ? 0b11111000 :
-                   (sec_ones == 8) ? 0b10000000 : 0b10010000;
-
-  DISPLAY_PTR[4] = (sec_tens == 0) ? 0b11000000 :
-                   (sec_tens == 1) ? 0b11111001 :
-                   (sec_tens == 2) ? 0b10100100 :
-                   (sec_tens == 3) ? 0b10110000 :
-                   (sec_tens == 4) ? 0b10011001 :
-                   (sec_tens == 5) ? 0b10010010 :
-                   (sec_tens == 6) ? 0b10000010 :
-                   (sec_tens == 7) ? 0b11111000 :
-                   (sec_tens == 8) ? 0b10000000 : 0b10010000;
-
-  DISPLAY_PTR[8] = (min_ones == 0) ? 0b11000000 :
-                   (min_ones == 1) ? 0b11111001 :
-                   (min_ones == 2) ? 0b10100100 :
-                   (min_ones == 3) ? 0b10110000 :
-                   (min_ones == 4) ? 0b10011001 :
-                   (min_ones == 5) ? 0b10010010 :
-                   (min_ones == 6) ? 0b10000010 :
-                   (min_ones == 7) ? 0b11111000 :
-                   (min_ones == 8) ? 0b10000000 : 0b10010000;
-
-  DISPLAY_PTR[12] = (min_tens == 0) ? 0b11000000 :
-                    (min_tens == 1) ? 0b11111001 :
-                    (min_tens == 2) ? 0b10100100 :
-                    (min_tens == 3) ? 0b10110000 :
-                    (min_tens == 4) ? 0b10011001 :
-                    (min_tens == 5) ? 0b10010010 :
-                    (min_tens == 6) ? 0b10000010 :
-                    (min_tens == 7) ? 0b11111000 :
-                    (min_tens == 8) ? 0b10000000 : 0b10010000;
-
-  DISPLAY_PTR[16] = (hou_ones == 0) ? 0b11000000 :
-                    (hou_ones == 1) ? 0b11111001 :
-                    (hou_ones == 2) ? 0b10100100 :
-                    (hou_ones == 3) ? 0b10110000 :
-                    (hou_ones == 4) ? 0b10011001 :
-                    (hou_ones == 5) ? 0b10010010 :
-                    (hou_ones == 6) ? 0b10000010 :
-                    (hou_ones == 7) ? 0b11111000 :
-                    (hou_ones == 8) ? 0b10000000 : 0b10010000;
-
-  DISPLAY_PTR[20] = (hou_tens == 0) ? 0b11000000 :
-                    (hou_tens == 1) ? 0b11111001 :
-                    (hou_tens == 2) ? 0b10100100 :
-                    (hou_tens == 3) ? 0b10110000 :
-                    (hou_tens == 4) ? 0b10011001 :
-                    (hou_tens == 5) ? 0b10010010 :
-                    (hou_tens == 6) ? 0b10000010 :
-                    (hou_tens == 7) ? 0b11111000 :
-                    (hou_tens == 8) ? 0b10000000 : 0b10010000;
+  set_displays(0, sec_ones);
+  set_displays(1, sec_tens);
+  set_displays(2, min_ones);
+  set_displays(3, min_tens);
+  set_displays(4, hou_ones);
+  set_displays(5, hou_tens);
 }
 
 /* Helper: advance time by a given number of seconds and refresh displays */
@@ -193,7 +162,7 @@ void handle_interrupt(unsigned cause) {
       advance_time_seconds(TIME_INCREMENT);
 
       // Debounce: allow hardware to settle, then clear any residual edges
-      delay(1000);
+      delay(SWITCH_DEBOUNCE_MS);
       *switch_edge_capture = *switch_edge_capture;
 
       // Re-enable the configured switch interrupt
