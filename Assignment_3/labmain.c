@@ -49,7 +49,8 @@ int previous_switch_state = 0;
 /* Helper function: Display a single digit (0-9) on a 7-segment display */
 void set_displays(int display_number, int value) {
   // Create a pointer to the specific display (each display is 4 bytes apart)
-  volatile int *DISPLAY_PTR = DISPLAYS_PTR + 4 * display_number;
+  // Since DISPLAYS_PTR is int*, adding 1 already adds 4 bytes (sizeof(int))
+  volatile int *DISPLAY_PTR = DISPLAYS_PTR + display_number;
   char pattern;
 
   // Convert digit to 7-segment pattern
@@ -94,14 +95,28 @@ void labinit(void) {
 /* Handle interrupts from BOTH timer (normal ticking) and switches (time jumps) */
 void handle_interrupt(unsigned cause) {
 
-  // ====== TIMER INTERRUPT (cause is timer) ======
-  // This handles the normal 1-second clock ticking
-  timeout_counter++; // Increment the timeout counter
+  // ====== TIMER INTERRUPT (cause != 17) ======
+  // This handles the normal 0.1-second timer ticks
+  if (cause != 17) {
+    // CRITICAL: Acknowledge timer interrupt by clearing the status bit
+    *timer_status = 0;
 
-  if (timeout_counter == 10) { // Every 1 second (10 × 0.1s)
-    timeout_counter = 0; // Reset the timeout counter
+    timeout_counter++; // Increment the timeout counter (0-9 for deciseconds)
 
-    // Extract the digits from mytime and hours (BCD format)
+    if (timeout_counter == 10) { // Every 1 second (10 × 0.1s)
+      timeout_counter = 0; // Reset the timeout counter
+
+      // Tick the clock forward by 1 second
+      tick(&mytime); // Ticks the clock once
+
+      // Handle hour rollover
+      if (mytime == 0x10000) { // After 0x5959 it goes to 0x10000, then reset mytime and increment hours
+        mytime = 0;
+        hours++;
+        if (hours == 24) hours = 0;
+      }
+
+      // Extract the digits from mytime and hours (BCD format)
       int sec_ones = (mytime >> 0) & 0xF;
       int sec_tens = (mytime >> 4) & 0xF;
       int min_ones = (mytime >> 8) & 0xF;
@@ -109,28 +124,20 @@ void handle_interrupt(unsigned cause) {
       int hou_ones = hours % 10;
       int hou_tens = hours / 10;
 
-    // Update the 7-segment displays
-      set_displays(0, sec_ones);
-      set_displays(1, sec_tens);
-      set_displays(2, min_ones);
-      set_displays(3, min_tens);
-      set_displays(4, hou_ones);
-      set_displays(5, hou_tens);
-
-      // Tick the clock forward by 1 second
-    tick(&mytime); // Ticks the clock once
-
-      // Handle hour rollover
-    if (mytime == 0x10000) { // After 0x5959 it goes to 0x10000, then reset mytime and increment hours
-        mytime = 0;
-        hours++;
-        if (hours == 24) hours = 0;
-      }
+      // Update the 7-segment displays: HH:MM:SS (hours:minutes:seconds)
+      // Display 5 (leftmost) to 0 (rightmost)
+      set_displays(5, hou_tens);  // Hours tens (leftmost)
+      set_displays(4, hou_ones);  // Hours ones
+      set_displays(3, min_tens);  // Minutes tens
+      set_displays(2, min_ones);  // Minutes ones
+      set_displays(1, sec_tens);  // Seconds tens
+      set_displays(0, sec_ones);  // Seconds ones (rightmost)
     }
+  }
 
   // ====== SWITCH INTERRUPT (cause == 17) ======
   // This handles the switch toggling to jump time forward
-  if (cause == 17) {
+  else if (cause == 17) {
     int current_switch_state = get_sw();
     int switch_changed = current_switch_state ^ previous_switch_state; // XOR to find changed bits
 
@@ -155,12 +162,12 @@ void handle_interrupt(unsigned cause) {
       int hou_ones = hours % 10;
       int hou_tens = hours / 10;
 
-      set_displays(0, sec_ones);
-      set_displays(1, sec_tens);
-      set_displays(2, min_ones);
-      set_displays(3, min_tens);
-      set_displays(4, hou_ones);
-      set_displays(5, hou_tens);
+      set_displays(5, hou_tens);  // Hours tens (leftmost)
+      set_displays(4, hou_ones);  // Hours ones
+      set_displays(3, min_tens);  // Minutes tens
+      set_displays(2, min_ones);  // Minutes ones
+      set_displays(1, sec_tens);  // Seconds tens
+      set_displays(0, sec_ones);  // Seconds ones (rightmost)
     }
 
     // Update switch state
