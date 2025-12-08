@@ -144,7 +144,8 @@ enable_interrupt:
     csrs mie, t1       # Sätt bits 4 och 5 i mie-registret
 
     # Slå på global machine-interrupt (MIE-flaggan i mstatus)
-    csrsi mstatus, 3
+    # Bit 3 i mstatus = MIE (Machine Interrupt Enable) = värde 8
+    csrsi mstatus, 8   # Sätt bit 3 (inte bit 0+1!)
 
 	# Klar, CPUn kommer nu ta emot timer-IRQ och switch-IRQ och hoppa till _isr_handler
     ret
