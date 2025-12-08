@@ -1,9 +1,15 @@
-/* s_flex.c
+/* labmain.c - Flexible Lab 3 Implementation
+
+   Handles interrupts from BOTH Timer and Switches
 
    This file written 2024 by Artur Podobas and Pedro Antunes
+   Modified to support flexible switch interrupt configuration
 
-   For copyright and licensing, see file COPYING 
+   For copyright and licensing, see file COPYING
 
+   ASSIGNMENT CONFIGURATION:
+   - Assignment #1633: Set SWITCH_NUMBER=3, TIME_INCREMENT=2
+   - Assignment #1632: Set SWITCH_NUMBER=2, TIME_INCREMENT=3
 */
 
 
@@ -36,6 +42,18 @@ volatile int *LED_PTR       = (volatile int *) 0x04000000; // LEDs
 volatile int *DISPLAYS_PTR  = (volatile int *) 0x04000050; // 7-segment displays
 volatile int *SWITCH_PTR    = (volatile int *) 0x04000010; // Switches (data register, offset 0)
 volatile int *BUTTON_PTR    = (volatile int *) 0x040000d0; // Buttons
+
+/* GPIO PIO registers for Switches (base = 0x04000010) */
+volatile int *switch_data          = (volatile int *) 0x04000010; // Offset 0: Read switch values
+volatile int *switch_direction     = (volatile int *) 0x04000014; // Offset 1: Direction (not used for input-only)
+volatile int *switch_interruptmask = (volatile int *) 0x04000018; // Offset 2: Interrupt mask
+volatile int *switch_edgecapture   = (volatile int *) 0x0400001C; // Offset 3: Edge capture
+
+/* GPIO PIO registers for Buttons (base = 0x040000d0) - for future use */
+volatile int *button_data          = (volatile int *) 0x040000d0; // Offset 0: Read button values
+volatile int *button_direction     = (volatile int *) 0x040000d4; // Offset 1: Direction (not used for input-only)
+volatile int *button_interruptmask = (volatile int *) 0x040000d8; // Offset 2: Interrupt mask
+volatile int *button_edgecapture   = (volatile int *) 0x040000dC; // Offset 3: Edge capture
 
 /* Timer registers */
 volatile int *timer_status  = (volatile int *) 0x04000020; // Offset 0
@@ -78,12 +96,28 @@ int get_btn(void) {
 
 /* Initialize interrupts for BOTH timer and switches */
 void labinit(void) {
+  // ====== TIMER CONFIGURATION ======
   // Configure timer for 0.1 second interrupts
   int period = 3000000 - 1;                 // Set the timer period to 3 million cycles (0.1 sec at 30 MHz)
   *timer_periodl = period & 0xFFFF;         // Set the lower 16 bits of the period
   *timer_periodh = (period >> 16) & 0xFFFF; // Set the upper 16 bits of the period
   *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
 
+  // ====== SWITCH GPIO CONFIGURATION ======
+  // Clear any pending edge captures from switches
+  *switch_edgecapture = 0xFFFFFFFF;         // Write all 1s to clear all edge capture bits
+
+  // Enable interrupts for the specific switch we're monitoring
+  // SWITCH_BIT_POSITION is defined at the top (0 for Switch #1, 1 for Switch #2, 2 for Switch #3, etc.)
+  *switch_interruptmask = (1 << SWITCH_BIT_POSITION);  // Enable interrupt for only this switch
+
+  // ====== BUTTON GPIO CONFIGURATION (for future use) ======
+  // Clear any pending edge captures from buttons
+  *button_edgecapture = 0xFFFFFFFF;         // Write all 1s to clear all edge capture bits
+  // Keep button interrupts disabled for now (can enable in the future)
+  *button_interruptmask = 0;                // No button interrupts enabled yet
+
+  // ====== DISPLAY INITIALIZATION ======
   // Initialize displays to show the starting time immediately
   int sec_ones = (mytime >> 0) & 0xF;
   int sec_tens = (mytime >> 4) & 0xF;
@@ -99,25 +133,78 @@ void labinit(void) {
   set_displays(4, hou_ones);
   set_displays(5, hou_tens);
 
-  // Enable global interrupts (timer only)
+  // ====== ENABLE GLOBAL INTERRUPTS ======
+  // This function in boot.S enables mie bits for timer (16) and switches (17)
   enable_interrupt();
 }
 
-/* Handle timer interrupts */
+/* Handle interrupts from BOTH timer and switches */
 void handle_interrupt(unsigned cause) {
 
-  // ====== TIMER INTERRUPT ======
-  // Check if timer status register indicates a timer interrupt
-  if (*timer_status & 1) {
-    // CRITICAL: Acknowledge timer interrupt by clearing the status bit
-    *timer_status = 0;
+  // ====== TIMER INTERRUPT (IRQ 16) ======
+  if (cause == 16) {
+    // Check if timer status register indicates a timer interrupt
+    if (*timer_status & 1) {
+      // CRITICAL: Acknowledge timer interrupt by clearing the status bit
+      *timer_status = 0;
 
-    timeout_counter++; // Increment the timeout counter (0-9 for deciseconds)
+      timeout_counter++; // Increment the timeout counter (0-9 for deciseconds)
 
-    if (timeout_counter == 10) { // Every 1 second (10 × 0.1s)
-      timeout_counter = 0; // Reset the timeout counter
+      if (timeout_counter == 10) { // Every 1 second (10 × 0.1s)
+        timeout_counter = 0; // Reset the timeout counter
 
-      // Extract the digits from mytime and hours (BCD format) - BEFORE ticking
+        // Extract the digits from mytime and hours (BCD format) - BEFORE ticking
+        int sec_ones = (mytime >> 0) & 0xF;
+        int sec_tens = (mytime >> 4) & 0xF;
+        int min_ones = (mytime >> 8) & 0xF;
+        int min_tens = (mytime >> 12) & 0xF;
+        int hou_ones = hours % 10;
+        int hou_tens = hours / 10;
+
+        // Update the 7-segment displays (same order as Assignment 2)
+        set_displays(0, sec_ones);
+        set_displays(1, sec_tens);
+        set_displays(2, min_ones);
+        set_displays(3, min_tens);
+        set_displays(4, hou_ones);
+        set_displays(5, hou_tens);
+
+        // Tick the clock forward by 1 second
+        tick(&mytime);
+
+        // Handle hour rollover
+        if (mytime == 0x10000) { // After 0x5959 it goes to 0x10000, then reset mytime and increment hours
+          mytime = 0;
+          hours++;
+          if (hours == 24) hours = 0;
+        }
+      }
+    }
+  }
+
+  // ====== SWITCH INTERRUPT (IRQ 17) ======
+  else if (cause == 17) {
+    // Read the edge capture register to see which switch(es) triggered
+    int edge_capture = *switch_edgecapture;
+
+    // Check if our specific switch triggered the interrupt
+    if (edge_capture & (1 << SWITCH_BIT_POSITION)) {
+      // CRITICAL: Clear the edge capture bit by writing 1 to it
+      *switch_edgecapture = (1 << SWITCH_BIT_POSITION);
+
+      // Advance the clock by TIME_INCREMENT seconds
+      for (int i = 0; i < TIME_INCREMENT; i++) {
+        tick(&mytime);
+
+        // Handle hour rollover
+        if (mytime == 0x10000) {
+          mytime = 0;
+          hours++;
+          if (hours == 24) hours = 0;
+        }
+      }
+
+      // Update the displays immediately to show the new time
       int sec_ones = (mytime >> 0) & 0xF;
       int sec_tens = (mytime >> 4) & 0xF;
       int min_ones = (mytime >> 8) & 0xF;
@@ -125,7 +212,6 @@ void handle_interrupt(unsigned cause) {
       int hou_ones = hours % 10;
       int hou_tens = hours / 10;
 
-      // Update the 7-segment displays (same order as Assignment 2)
       set_displays(0, sec_ones);
       set_displays(1, sec_tens);
       set_displays(2, min_ones);
@@ -133,16 +219,22 @@ void handle_interrupt(unsigned cause) {
       set_displays(4, hou_ones);
       set_displays(5, hou_tens);
 
-      // Tick the clock forward by 1 second
-      tick(&mytime);
-
-      // Handle hour rollover
-      if (mytime == 0x10000) { // After 0x5959 it goes to 0x10000, then reset mytime and increment hours
-        mytime = 0;
-        hours++;
-        if (hours == 24) hours = 0;
-      }
+      // Add a delay to prevent multiple triggers from switch bouncing
+      // This delay gives the switch time to settle
+      delay(1000000); // Approximately 0.033 seconds at 30 MHz
     }
+  }
+
+  // ====== BUTTON INTERRUPT (IRQ 18) - FOR FUTURE USE ======
+  else if (cause == 18) {
+    // Read the edge capture register to see which button(s) triggered
+    int edge_capture = *button_edgecapture;
+
+    // Clear all edge capture bits
+    *button_edgecapture = 0xFFFFFFFF;
+
+    // TODO: Add button handling logic here in the future
+    // For now, just acknowledge and ignore
   }
 
 }
