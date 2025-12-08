@@ -185,10 +185,19 @@ void handle_interrupt(unsigned cause) {
   if (cause == 17) {
     unsigned int edges = *switch_edge_capture; // latched edges
     if (edges & (1 << SWITCH_BIT_POSITION)) {
+      // Temporarily mask to avoid rapid retrigger from switch bounce
+      *switch_irq_mask = 0;
+
       *switch_edge_capture = edges; // clear captured edges
       previous_switch_state = get_sw();
       advance_time_seconds(TIME_INCREMENT);
-      delay(10); // simple debounce
+
+      // Debounce: allow hardware to settle, then clear any residual edges
+      delay(1000);
+      *switch_edge_capture = *switch_edge_capture;
+
+      // Re-enable the configured switch interrupt
+      *switch_irq_mask = (1 << SWITCH_BIT_POSITION);
     } else {
       *switch_edge_capture = edges; // still clear any other edges
     }
