@@ -48,9 +48,8 @@ int previous_switch_state = 0;
 
 /* Helper function: Display a single digit (0-9) on a 7-segment display */
 void set_displays(int display_number, int value) {
-  // Create a pointer to the specific display (each display is 4 bytes apart)
-  // Since DISPLAYS_PTR is int*, adding 1 already adds 4 bytes (sizeof(int))
-  volatile int *DISPLAY_PTR = DISPLAYS_PTR + display_number;
+  // Each display is 16 bytes apart in memory (4 int-sized steps = 16 bytes)
+  volatile int *DISPLAY_PTR = DISPLAYS_PTR + 4 * display_number;
   char pattern;
 
   // Convert digit to 7-segment pattern
@@ -88,21 +87,6 @@ void labinit(void) {
   *timer_periodh = (period >> 16) & 0xFFFF; // Set the upper 16 bits of the period
   *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
 
-  // Initialize displays to show the starting time immediately
-  int sec_ones = (mytime >> 0) & 0xF;
-  int sec_tens = (mytime >> 4) & 0xF;
-  int min_ones = (mytime >> 8) & 0xF;
-  int min_tens = (mytime >> 12) & 0xF;
-  int hou_ones = hours % 10;
-  int hou_tens = hours / 10;
-
-  set_displays(5, hou_tens);  // Hours tens (leftmost)
-  set_displays(4, hou_ones);  // Hours ones
-  set_displays(3, min_tens);  // Minutes tens
-  set_displays(2, min_ones);  // Minutes ones
-  set_displays(1, sec_tens);  // Seconds tens
-  set_displays(0, sec_ones);  // Seconds ones (rightmost)
-
   // CRITICAL: Read initial switch state to detect changes later
   previous_switch_state = get_sw();
 
@@ -124,17 +108,7 @@ void handle_interrupt(unsigned cause) {
     if (timeout_counter == 10) { // Every 1 second (10 × 0.1s)
       timeout_counter = 0; // Reset the timeout counter
 
-      // Tick the clock forward by 1 second
-      tick(&mytime); // Ticks the clock once
-
-      // Handle hour rollover
-      if (mytime == 0x10000) { // After 0x5959 it goes to 0x10000, then reset mytime and increment hours
-        mytime = 0;
-        hours++;
-        if (hours == 24) hours = 0;
-      }
-
-      // Extract the digits from mytime and hours (BCD format)
+      // Extract the digits from mytime and hours (BCD format) - BEFORE ticking
       int sec_ones = (mytime >> 0) & 0xF;
       int sec_tens = (mytime >> 4) & 0xF;
       int min_ones = (mytime >> 8) & 0xF;
@@ -142,14 +116,23 @@ void handle_interrupt(unsigned cause) {
       int hou_ones = hours % 10;
       int hou_tens = hours / 10;
 
-      // Update the 7-segment displays: HH:MM:SS (hours:minutes:seconds)
-      // Display 5 (leftmost) to 0 (rightmost)
-      set_displays(5, hou_tens);  // Hours tens (leftmost)
-      set_displays(4, hou_ones);  // Hours ones
-      set_displays(3, min_tens);  // Minutes tens
-      set_displays(2, min_ones);  // Minutes ones
-      set_displays(1, sec_tens);  // Seconds tens
-      set_displays(0, sec_ones);  // Seconds ones (rightmost)
+      // Update the 7-segment displays (same order as Assignment 2)
+      set_displays(0, sec_ones);
+      set_displays(1, sec_tens);
+      set_displays(2, min_ones);
+      set_displays(3, min_tens);
+      set_displays(4, hou_ones);
+      set_displays(5, hou_tens);
+
+      // Tick the clock forward by 1 second
+      tick(&mytime);
+
+      // Handle hour rollover
+      if (mytime == 0x10000) { // After 0x5959 it goes to 0x10000, then reset mytime and increment hours
+        mytime = 0;
+        hours++;
+        if (hours == 24) hours = 0;
+      }
     }
   }
 
@@ -180,12 +163,12 @@ void handle_interrupt(unsigned cause) {
       int hou_ones = hours % 10;
       int hou_tens = hours / 10;
 
-      set_displays(5, hou_tens);  // Hours tens (leftmost)
-      set_displays(4, hou_ones);  // Hours ones
-      set_displays(3, min_tens);  // Minutes tens
-      set_displays(2, min_ones);  // Minutes ones
-      set_displays(1, sec_tens);  // Seconds tens
-      set_displays(0, sec_ones);  // Seconds ones (rightmost)
+      set_displays(0, sec_ones);
+      set_displays(1, sec_tens);
+      set_displays(2, min_ones);
+      set_displays(3, min_tens);
+      set_displays(4, hou_ones);
+      set_displays(5, hou_tens);
     }
 
     // Update switch state
