@@ -135,11 +135,14 @@ enable_interrupt:
     # startadressen för all trap/interrupt-hantering.
     csrw mtvec, t0
 
-    # Tillåt externa interrupts från den specifika klockan (4 biten=16)
-    csrsi mie, 16 // Bit 4 i mie / mask 10000 = 16 : kopplad till Avalon-timer (IRQ-källa). Tillåter kommunikation från timer till CPU
+    # Tillåt externa interrupts från den specifika klockan (bit 4 = 16)
+    csrsi mie, 16 // Bit 4 i mie / mask 10000 = 16 : kopplad till Avalon-timer (IRQ-källa)
+
+    # Tillåt externa interrupts från switches (bit 5 = 32)
+    csrsi mie, 32 // Bit 5 i mie / mask 100000 = 32 : kopplad till Switches (IRQ-källa 17)
 
     # Slå på global machine-interrupt (MIE-flaggan i mstatus)
     csrsi mstatus, 3
 
-	# Klar, CPUn kommer nu ta emot timer-IRQ och hoppa till _isr_handler
+	# Klar, CPUn kommer nu ta emot timer-IRQ och switch-IRQ och hoppa till _isr_handler
     ret
