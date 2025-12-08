@@ -12,6 +12,7 @@
 #define TIME_INCREMENT 3            // Seconds to add per switch/button interrupt (2 or 3)
 #define SWITCH_DEBOUNCE_MS 10       // Small delay to filter bounce without stalling timer
 #define ENABLE_BUTTON_INCREMENT 1   // Set to 1 to let the push-button also add TIME_INCREMENT
+#define BUTTON_RELEASE_WAIT_MS 1    // Polling delay while waiting for button release
 
 // Calculate bit position: Switch #1 -> bit 0, Switch #2 -> bit 1, etc.
 #define SWITCH_BIT_POSITION (SWITCH_NUMBER - 1)
@@ -181,10 +182,18 @@ void handle_interrupt(unsigned cause) {
     if (ENABLE_BUTTON_INCREMENT && (edges & 0x1)) {
       *button_irq_mask = 0;             // mask during service
       *button_edge_capture = edges;     // clear latched edge
+
       advance_time_seconds(TIME_INCREMENT);
-      delay(SWITCH_DEBOUNCE_MS);        // reuse same short debounce
-      *button_edge_capture = *button_edge_capture; // clear any bounce
-      *button_irq_mask = 0x1;           // unmask
+
+      // Debounce and then wait for the button to be released before unmasking
+      delay(SWITCH_DEBOUNCE_MS);
+      while ((*BUTTON_PTR & 0x1) != 0) {
+        delay(BUTTON_RELEASE_WAIT_MS);
+      }
+
+      // Clear any residual edges from the release and re-enable
+      *button_edge_capture = *button_edge_capture;
+      *button_irq_mask = 0x1;
     } else {
       *button_edge_capture = edges;     // still acknowledge
     }

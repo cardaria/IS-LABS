@@ -13,6 +13,7 @@ This guide explains, step by step, what the code in `labmain.c` and `boot.S` doe
 - `TIME_INCREMENT`: how many seconds to add per switch or button interrupt (matches the Lab 3 surprise variants).
 - `SWITCH_DEBOUNCE_MS`: tiny delay (10 ms) used after a switch/button edge so bouncing plastic does not double-trigger.
 - `ENABLE_BUTTON_INCREMENT`: set to 1 if you want the button to increment time; set to 0 to ignore button presses.
+- `BUTTON_RELEASE_WAIT_MS`: how long to sleep between polls while waiting for the button to be released (so a long press only adds once).
 
 ## Boot and setup flow (ordered)
 1. **`_start` in `boot.S`:**
@@ -47,7 +48,8 @@ This guide explains, step by step, what the code in `labmain.c` and `boot.S` doe
      2. Clear the edge.
      3. Add `TIME_INCREMENT` seconds (same helper as the switch).
      4. Wait the short debounce delay.
-     5. Clear any bounce and unmask the button line.
+     5. Keep polling the button state with a tiny `BUTTON_RELEASE_WAIT_MS` sleep until it is released so a long hold does not add multiple times.
+     6. Clear any bounce from the release and unmask the button line.
      Otherwise, we simply clear the edge to keep it quiet.
 
 ## Data and display flow inside `labmain.c`
