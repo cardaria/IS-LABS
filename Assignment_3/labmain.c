@@ -87,6 +87,21 @@ void labinit(void) {
   *timer_periodh = (period >> 16) & 0xFFFF; // Set the upper 16 bits of the period
   *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
 
+  // Initialize displays to show the starting time immediately
+  int sec_ones = (mytime >> 0) & 0xF;
+  int sec_tens = (mytime >> 4) & 0xF;
+  int min_ones = (mytime >> 8) & 0xF;
+  int min_tens = (mytime >> 12) & 0xF;
+  int hou_ones = hours % 10;
+  int hou_tens = hours / 10;
+
+  set_displays(0, sec_ones);
+  set_displays(1, sec_tens);
+  set_displays(2, min_ones);
+  set_displays(3, min_tens);
+  set_displays(4, hou_ones);
+  set_displays(5, hou_tens);
+
   // CRITICAL: Read initial switch state to detect changes later
   previous_switch_state = get_sw();
 
