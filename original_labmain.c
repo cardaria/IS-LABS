@@ -1,18 +1,11 @@
-/* s_flex.c
+/* original_labmain.c
 
    This file written 2024 by Artur Podobas and Pedro Antunes
 
-   For copyright and licensing, see file COPYING 
+   For copyright and licensing, see file COPYING
 
+   Minimal implementation with Timer interrupt only (baseline version)
 */
-
-
-// *** SWITCH CONFIGURATION ***
-#define SWITCH_NUMBER 2           // CHANGE THIS: 2 for Switch #2, 3 for Switch #3
-#define TIME_INCREMENT 3          // CHANGE THIS: How many seconds to add (2 or 3)
-
-// Calculate the bit position for the switch (Switch #1 = bit 0, Switch #2 = bit 1, etc.)
-#define SWITCH_BIT_POSITION (SWITCH_NUMBER - 1)
 
 /* External function declarations - these are defined in other files */
 extern void print(const char*);
@@ -66,25 +59,8 @@ void set_displays(int display_number, int value) {
   *DISPLAY_PTR = pattern; // Write pattern to the display
 }
 
-/* Helper function: Read all 10 switches */
-int get_sw(void) {
-  return *SWITCH_PTR & 0x3FF; // Return the lowest 10 bits [1023]
-}
-
-/* Helper function: Read button state */
-int get_btn(void) {
-  return *BUTTON_PTR & 0x1; // Return the lowest 1 bit
-}
-
-/* Initialize interrupts for BOTH timer and switches */
-void labinit(void) {
-  // Configure timer for 0.1 second interrupts
-  int period = 3000000 - 1;                 // Set the timer period to 3 million cycles (0.1 sec at 30 MHz)
-  *timer_periodl = period & 0xFFFF;         // Set the lower 16 bits of the period
-  *timer_periodh = (period >> 16) & 0xFFFF; // Set the upper 16 bits of the period
-  *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
-
-  // Initialize displays to show the starting time immediately
+/* Helper function: Update all 7-segment displays to reflect current time */
+void update_displays(void) {
   int sec_ones = (mytime >> 0) & 0xF;
   int sec_tens = (mytime >> 4) & 0xF;
   int min_ones = (mytime >> 8) & 0xF;
@@ -98,53 +74,62 @@ void labinit(void) {
   set_displays(3, min_tens);
   set_displays(4, hou_ones);
   set_displays(5, hou_tens);
+}
 
-  // Enable global interrupts (timer only)
+/* Helper function: Advance time by N seconds and update displays */
+void advance_time_seconds(int seconds) {
+  for (int i = 0; i < seconds; i++) {
+    tick(&mytime);
+    if (mytime == 0x10000) { // After 0x5959 it goes to 0x10000
+      mytime = 0;
+      hours++;
+      if (hours == 24) hours = 0;
+    }
+  }
+  update_displays();
+}
+
+/* Helper function: Read all 10 switches */
+int get_sw(void) {
+  return *SWITCH_PTR & 0x3FF; // Return the lowest 10 bits [1023]
+}
+
+/* Helper function: Read button state */
+int get_btn(void) {
+  return *BUTTON_PTR & 0x1; // Return the lowest 1 bit
+}
+
+/* Initialize interrupts for timer only */
+void labinit(void) {
+  // Configure timer for 0.1 second interrupts
+  int period = 3000000 - 1;                 // Set the timer period to 3 million cycles (0.1 sec at 30 MHz)
+  *timer_periodl = period & 0xFFFF;         // Set the lower 16 bits of the period
+  *timer_periodh = (period >> 16) & 0xFFFF; // Set the upper 16 bits of the period
+  *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
+
+  // Initialize displays to show the starting time immediately
+  update_displays();
+
+  // Enable global interrupts
   enable_interrupt();
 }
 
 /* Handle timer interrupts */
 void handle_interrupt(unsigned cause) {
 
-  // ====== TIMER INTERRUPT ======
-  // Check if timer status register indicates a timer interrupt
-  if (*timer_status & 1) {
-    // CRITICAL: Acknowledge timer interrupt by clearing the status bit
+  // ====== TIMER INTERRUPT (IRQ 16) ======
+  if (cause == 16 && (*timer_status & 1)) {
+    // Acknowledge timer interrupt by clearing the status bit
     *timer_status = 0;
 
     timeout_counter++; // Increment the timeout counter (0-9 for deciseconds)
 
     if (timeout_counter == 10) { // Every 1 second (10 × 0.1s)
       timeout_counter = 0; // Reset the timeout counter
-
-      // Extract the digits from mytime and hours (BCD format) - BEFORE ticking
-      int sec_ones = (mytime >> 0) & 0xF;
-      int sec_tens = (mytime >> 4) & 0xF;
-      int min_ones = (mytime >> 8) & 0xF;
-      int min_tens = (mytime >> 12) & 0xF;
-      int hou_ones = hours % 10;
-      int hou_tens = hours / 10;
-
-      // Update the 7-segment displays (same order as Assignment 2)
-      set_displays(0, sec_ones);
-      set_displays(1, sec_tens);
-      set_displays(2, min_ones);
-      set_displays(3, min_tens);
-      set_displays(4, hou_ones);
-      set_displays(5, hou_tens);
-
-      // Tick the clock forward by 1 second
-      tick(&mytime);
-
-      // Handle hour rollover
-      if (mytime == 0x10000) { // After 0x5959 it goes to 0x10000, then reset mytime and increment hours
-        mytime = 0;
-        hours++;
-        if (hours == 24) hours = 0;
-      }
+      advance_time_seconds(1);
     }
+    return;
   }
-
 }
 
 /* Main program */
