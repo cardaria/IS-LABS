@@ -1,19 +1,15 @@
-/* switches_labmain.c
+/* labmain.c
 
    This file written 2024 by Artur Podobas and Pedro Antunes
 
    For copyright and licensing, see file COPYING
 
-   Minimal implementation for Lab 3 surprise assignment: Timer + Switch interrupt
 */
 
-// *** SWITCH CONFIGURATION ***
-#define SWITCH_NUMBER 2           // CHANGE THIS: 2 for Switch #2, 3 for Switch #3
-#define TIME_INCREMENT 3          // CHANGE THIS: How many seconds to add (2 or 3)
-#define SWITCH_DEBOUNCE_MS 10     // Small delay to filter bounce
-
-// Calculate the bit position for the switch (Switch #1 = bit 0, Switch #2 = bit 1, etc.)
-#define SWITCH_BIT_POSITION (SWITCH_NUMBER - 1)
+// *** BUTTON CONFIGURATION ***
+#define TIME_INCREMENT 3          
+#define BUTTON_DEBOUNCE_MS 10
+#define BUTTON_RELEASE_WAIT_MS 1  // Polling delay while waiting for button release
 
 /* External function declarations - these are defined in other files */
 extern void print(const char*);
@@ -44,10 +40,10 @@ volatile int *timer_control = (volatile int *) 0x04000024; // Offset 1
 volatile int *timer_periodl = (volatile int *) 0x04000028; // Offset 2
 volatile int *timer_periodh = (volatile int *) 0x0400002C; // Offset 3
 
-/* Switch registers (Avalon PIO layout: data, direction, IRQ mask, edge capture) */
-volatile int *switch_direction     = (volatile int *) (0x04000010 + 0x04);
-volatile int *switch_irq_mask      = (volatile int *) (0x04000010 + 0x08);
-volatile int *switch_edge_capture  = (volatile int *) (0x04000010 + 0x0C);
+/* Button registers (Avalon PIO layout: data, direction, IRQ mask, edge capture) */
+volatile int *button_direction     = (volatile int *) (0x040000d0 + 0x04);
+volatile int *button_irq_mask      = (volatile int *) (0x040000d0 + 0x08);
+volatile int *button_edge_capture  = (volatile int *) (0x040000d0 + 0x0C);
 
 /* Helper function: Display a single digit (0-9) on a 7-segment display */
 void set_displays(int display_number, int value) {
@@ -102,7 +98,7 @@ void advance_time_seconds(int seconds) {
   update_displays();
 }
 
-/* Initialize interrupts for timer and switches */
+/* Initialize interrupts for timer and button */
 void labinit(void) {
   // Configure timer for 0.1 second interrupts
   int period = 3000000 - 1;                 // Set the timer period to 3 million cycles (0.1 sec at 30 MHz)
@@ -110,10 +106,10 @@ void labinit(void) {
   *timer_periodh = (period >> 16) & 0xFFFF; // Set the upper 16 bits of the period
   *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
 
-  // Configure switches: set as inputs and enable interrupt for selected switch
-  *switch_direction = 0x0;                      // All switches as input
-  *switch_edge_capture = 0x3FF;                 // Clear any stale edges
-  *switch_irq_mask = (1 << SWITCH_BIT_POSITION); // Enable IRQ for the configured switch
+  // Configure button: set as input and enable interrupt
+  *button_direction = 0x0;                  // All buttons as input
+  *button_edge_capture = 0x1;               // Clear any stale edges
+  *button_irq_mask = 0x1;                   // Enable IRQ for button 0 (bit 0)
 
   // Initialize displays to show the starting time immediately
   update_displays();
@@ -122,7 +118,7 @@ void labinit(void) {
   enable_interrupt();
 }
 
-/* Handle timer and switch interrupts */
+/* Handle timer and button interrupts */
 void handle_interrupt(unsigned cause) {
 
   // ====== TIMER INTERRUPT (IRQ 16) ======
@@ -139,29 +135,36 @@ void handle_interrupt(unsigned cause) {
     return;
   }
 
-  // ====== SWITCH INTERRUPT (IRQ 17) ======
-  if (cause == 17) {
-    unsigned int edges = *switch_edge_capture; // Read latched edges
+  // ====== BUTTON INTERRUPT (IRQ 18) ======
+  if (cause == 18) {
+    unsigned int edges = *button_edge_capture; // Read latched edges
 
-    if (edges & (1 << SWITCH_BIT_POSITION)) {
-      // Temporarily disable switch interrupts to prevent bounce retriggering
-      *switch_irq_mask = 0;
+    if (edges & 0x1) { // Check if button 0 triggered
+      // Temporarily disable button interrupts to prevent retriggering
+      *button_irq_mask = 0;
 
       // Clear the edge capture register
-      *switch_edge_capture = edges;
+      *button_edge_capture = edges;
 
       // Advance time by configured amount
       advance_time_seconds(TIME_INCREMENT);
 
-      // Debounce: wait for hardware to settle, then clear any residual edges
-      delay(SWITCH_DEBOUNCE_MS);
-      *switch_edge_capture = *switch_edge_capture;
+      // Debounce: wait for hardware to settle
+      delay(BUTTON_DEBOUNCE_MS);
 
-      // Re-enable the switch interrupt
-      *switch_irq_mask = (1 << SWITCH_BIT_POSITION);
+      // Wait for button to be released to prevent multiple increments on hold
+      while ((*BUTTON_PTR & 0x1) != 0) {
+        delay(BUTTON_RELEASE_WAIT_MS);
+      }
+
+      // Clear any residual edges from the release
+      *button_edge_capture = *button_edge_capture;
+
+      // Re-enable the button interrupt
+      *button_irq_mask = 0x1;
     } else {
       // Clear any other edges
-      *switch_edge_capture = edges;
+      *button_edge_capture = edges;
     }
     return;
   }
