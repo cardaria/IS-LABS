@@ -88,6 +88,24 @@ void labinit(void) {
   *timer_periodh = (period >> 16) & 0xFFFF; // Set the upper 16 bits of the period
   *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
 
+  // Initialize displays to show the starting time immediately
+  int sec_ones = (mytime >> 0) & 0xF;
+  int sec_tens = (mytime >> 4) & 0xF;
+  int min_ones = (mytime >> 8) & 0xF;
+  int min_tens = (mytime >> 12) & 0xF;
+  int hou_ones = hours % 10;
+  int hou_tens = hours / 10;
+
+  set_displays(5, hou_tens);  // Hours tens (leftmost)
+  set_displays(4, hou_ones);  // Hours ones
+  set_displays(3, min_tens);  // Minutes tens
+  set_displays(2, min_ones);  // Minutes ones
+  set_displays(1, sec_tens);  // Seconds tens
+  set_displays(0, sec_ones);  // Seconds ones (rightmost)
+
+  // CRITICAL: Read initial switch state to detect changes later
+  previous_switch_state = get_sw();
+
   // Enable global interrupts (this enables both timer and switch interrupts)
   enable_interrupt();
 }
@@ -95,9 +113,9 @@ void labinit(void) {
 /* Handle interrupts from BOTH timer (normal ticking) and switches (time jumps) */
 void handle_interrupt(unsigned cause) {
 
-  // ====== TIMER INTERRUPT (cause != 17) ======
-  // This handles the normal 0.1-second timer ticks
-  if (cause != 17) {
+  // ====== TIMER INTERRUPT ======
+  // Check if timer status register indicates a timer interrupt
+  if (*timer_status & 1) {
     // CRITICAL: Acknowledge timer interrupt by clearing the status bit
     *timer_status = 0;
 
@@ -137,7 +155,7 @@ void handle_interrupt(unsigned cause) {
 
   // ====== SWITCH INTERRUPT (cause == 17) ======
   // This handles the switch toggling to jump time forward
-  else if (cause == 17) {
+  if (cause == 17) {
     int current_switch_state = get_sw();
     int switch_changed = current_switch_state ^ previous_switch_state; // XOR to find changed bits
 
