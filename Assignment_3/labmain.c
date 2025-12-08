@@ -8,9 +8,10 @@
 
 // === CONFIGURATION ===
 // Set these values to match the desired surprise assignment.
-#define SWITCH_NUMBER 2           // 2 for Switch #2, 3 for Switch #3
-#define TIME_INCREMENT 3          // Seconds to add per switch interrupt (2 or 3)
-#define SWITCH_DEBOUNCE_MS 10     // Small delay to filter bounce without stalling timer
+#define SWITCH_NUMBER 2             // 2 for Switch #2, 3 for Switch #3
+#define TIME_INCREMENT 3            // Seconds to add per switch/button interrupt (2 or 3)
+#define SWITCH_DEBOUNCE_MS 10       // Small delay to filter bounce without stalling timer
+#define ENABLE_BUTTON_INCREMENT 1   // Set to 1 to let the push-button also add TIME_INCREMENT
 
 // Calculate bit position: Switch #1 -> bit 0, Switch #2 -> bit 1, etc.
 #define SWITCH_BIT_POSITION (SWITCH_NUMBER - 1)
@@ -125,10 +126,10 @@ void labinit(void) {
   *switch_irq_mask = (1 << SWITCH_BIT_POSITION); // Enable interrupt for chosen switch
   previous_switch_state = get_sw();
 
-  // Prepare button block (no behavior yet, but keep interrupt plumbing ready)
+  // Prepare button block
   *button_direction = 0x0;
   *button_edge_capture = 0x1;              // Clear potential edge
-  *button_irq_mask = 0x0;                  // Leave masked until used
+  *button_irq_mask = ENABLE_BUTTON_INCREMENT ? 0x1 : 0x0; // Enable if desired
 
   // Show the starting time immediately
   update_displays();
@@ -173,10 +174,20 @@ void handle_interrupt(unsigned cause) {
     return;
   }
 
-  // BUTTON interrupt (IRQ 18) - acknowledge to avoid repeated triggers
+  // BUTTON interrupt (IRQ 18) - optional time increment
   if (cause == 18) {
     unsigned int edges = *button_edge_capture;
-    *button_edge_capture = edges; // clear
+
+    if (ENABLE_BUTTON_INCREMENT && (edges & 0x1)) {
+      *button_irq_mask = 0;             // mask during service
+      *button_edge_capture = edges;     // clear latched edge
+      advance_time_seconds(TIME_INCREMENT);
+      delay(SWITCH_DEBOUNCE_MS);        // reuse same short debounce
+      *button_edge_capture = *button_edge_capture; // clear any bounce
+      *button_irq_mask = 0x1;           // unmask
+    } else {
+      *button_edge_capture = edges;     // still acknowledge
+    }
     return;
   }
 }
