@@ -37,19 +37,11 @@ volatile int *DISPLAYS_PTR  = (volatile int *) 0x04000050; // 7-segment displays
 volatile int *SWITCH_PTR    = (volatile int *) 0x04000010; // Switches (data register, offset 0)
 volatile int *BUTTON_PTR    = (volatile int *) 0x040000d0; // Buttons
 
-/* Switch PIO registers (according to PIO documentation) */
-volatile int *switch_direction     = (volatile int *) 0x04000014; // Offset 1 from switch base
-volatile int *switch_interruptmask = (volatile int *) 0x04000018; // Offset 2 from switch base
-volatile int *switch_edgecapture   = (volatile int *) 0x0400001C; // Offset 3 from switch base
-
 /* Timer registers */
 volatile int *timer_status  = (volatile int *) 0x04000020; // Offset 0
 volatile int *timer_control = (volatile int *) 0x04000024; // Offset 1
 volatile int *timer_periodl = (volatile int *) 0x04000028; // Offset 2
 volatile int *timer_periodh = (volatile int *) 0x0400002C; // Offset 3
-
-/* Track previous switch state to detect changes */
-int previous_switch_state = 0;
 
 /* Helper function: Display a single digit (0-9) on a 7-segment display */
 void set_displays(int display_number, int value) {
@@ -92,15 +84,6 @@ void labinit(void) {
   *timer_periodh = (period >> 16) & 0xFFFF; // Set the upper 16 bits of the period
   *timer_control = 0b111;                   // START + CONTINUOUS + INTERRUPT ENABLE (bits 0, 1, 2)
 
-  // CRITICAL: Configure switch hardware to generate interrupts!
-  // According to PIO documentation:
-  // 1. Set direction = 0 for INPUT (required for switches)
-  // 2. Set interruptmask bits to enable interrupts
-  // 3. Clear edgecapture to acknowledge any pending edges
-  *switch_direction = 0x000;      // Set all switches as INPUT (0 = input, 1 = output)
-  *switch_interruptmask = 0x3FF;  // Enable interrupts for all 10 switches (bits 0-9)
-  *switch_edgecapture = 0x3FF;    // Clear any pending edge captures
-
   // Initialize displays to show the starting time immediately
   int sec_ones = (mytime >> 0) & 0xF;
   int sec_tens = (mytime >> 4) & 0xF;
@@ -116,14 +99,11 @@ void labinit(void) {
   set_displays(4, hou_ones);
   set_displays(5, hou_tens);
 
-  // CRITICAL: Read initial switch state to detect changes later
-  previous_switch_state = get_sw();
-
-  // Enable global interrupts (this enables both timer and switch interrupts)
+  // Enable global interrupts (timer only)
   enable_interrupt();
 }
 
-/* Handle interrupts from BOTH timer (normal ticking) and switches (time jumps) */
+/* Handle timer interrupts */
 void handle_interrupt(unsigned cause) {
 
   // ====== TIMER INTERRUPT ======
@@ -165,52 +145,6 @@ void handle_interrupt(unsigned cause) {
     }
   }
 
-  // ====== SWITCH INTERRUPT (cause == 17) ======
-  // This handles the switch toggling to jump time forward
-  if (cause == 17) {
-    // CRITICAL: Clear edge capture register to acknowledge interrupt
-    // According to PIO doc: write any value to clear all bits (if bit-clearing disabled)
-    // or write 1s to bits you want to clear
-    *switch_edgecapture = 0x3FF;  // Clear all edge captures
-
-    int current_switch_state = get_sw();
-    int switch_changed = current_switch_state ^ previous_switch_state; // XOR to find changed bits
-
-    // Check if OUR specific switch changed (bit position)
-    if (switch_changed & (1 << SWITCH_BIT_POSITION)) {
-      // Increment mytime by the configured amount
-      // TIME_INCREMENT is in seconds, add directly in BCD
-      for (int i = 0; i < TIME_INCREMENT; i++) {
-        tick(&mytime);
-        if (mytime == 0x10000) {
-          mytime = 0;
-          hours++;
-          if (hours == 24) hours = 0;
-        }
-      }
-
-      // Update displays immediately
-      int sec_ones = (mytime >> 0) & 0xF;
-      int sec_tens = (mytime >> 4) & 0xF;
-      int min_ones = (mytime >> 8) & 0xF;
-      int min_tens = (mytime >> 12) & 0xF;
-      int hou_ones = hours % 10;
-      int hou_tens = hours / 10;
-
-      set_displays(0, sec_ones);
-      set_displays(1, sec_tens);
-      set_displays(2, min_ones);
-      set_displays(3, min_tens);
-      set_displays(4, hou_ones);
-      set_displays(5, hou_tens);
-    }
-
-    // Update switch state
-    previous_switch_state = current_switch_state;
-
-    // Debounce delay to prevent multiple triggers
-    for (volatile int i = 0; i < 100000; i++);
-  }
 }
 
 /* Main program */
