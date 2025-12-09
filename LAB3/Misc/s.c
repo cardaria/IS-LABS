@@ -142,7 +142,7 @@ void handle_interrupt(unsigned cause) {
   if (cause == 17) {
     unsigned int edges = *switch_edge_capture; // Read latched edges
 
-    if (edges & (1 << SWITCH_BIT_POSITION)) {
+    if (edges & (1 << SWITCH_BIT_POSITION)) { 
       // Temporarily disable switch interrupts to prevent bounce retriggering
       *switch_irq_mask = 0;
 
