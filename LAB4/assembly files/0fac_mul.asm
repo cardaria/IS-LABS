@@ -5,7 +5,7 @@
 
 loop_outer:
     beq  t1,tp,done              # if i == n+1 -> done
-    mul  t2,t2,t1                # t2 = t2 * i (using MUL instruction!)
+    mul  t2,t2,t1                # t2 = t2 * i
     addi t1,t1,1                 # i++
     beq  zero,zero,loop_outer    # unconditional jump
 
